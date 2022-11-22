@@ -1,0 +1,63 @@
+package com.example.websftp;
+
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.builder.SpringApplicationBuilder;
+import org.springframework.context.annotation.Bean;
+import org.springframework.integration.annotation.InboundChannelAdapter;
+import org.springframework.integration.annotation.ServiceActivator;
+import org.springframework.integration.annotation.Transformer;
+import org.springframework.integration.core.MessageSource;
+import org.springframework.integration.file.filters.AcceptAllFileListFilter;
+import org.springframework.integration.handler.advice.ExpressionEvaluatingRequestHandlerAdvice;
+import org.springframework.integration.sftp.inbound.SftpStreamingMessageSource;
+import org.springframework.integration.sftp.session.SftpRemoteFileTemplate;
+import org.springframework.integration.transformer.StreamTransformer;
+import org.springframework.messaging.MessageHandler;
+
+import java.io.InputStream;
+
+@SpringBootApplication
+public class SftpJavaApplication {
+
+    public static void main(String[] args) {
+        new SpringApplicationBuilder(SftpJavaApplication.class)
+            .web(false)
+            .run(args);
+    }
+
+    @Bean
+    @InboundChannelAdapter(channel = "stream")
+    public MessageSource<InputStream> ftpMessageSource() {
+        SftpStreamingMessageSource messageSource = new SftpStreamingMessageSource(template());
+        messageSource.setRemoteDirectory("sftpSource/");
+        messageSource.setFilter(new AcceptAllFileListFilter<>());
+        messageSource.setMaxFetchSize(1);
+        return messageSource;
+    }
+
+    @Bean
+    @Transformer(inputChannel = "stream", outputChannel = "data")
+    public org.springframework.integration.transformer.Transformer transformer() {
+        return new StreamTransformer("UTF-8");
+    }
+
+    @Bean
+    public SftpRemoteFileTemplate template() {
+        return new SftpRemoteFileTemplate(sftpSessionFactory());
+    }
+
+    @ServiceActivator(inputChannel = "data", adviceChain = "after")
+    @Bean
+    public MessageHandler handle() {
+        return System.out::println;
+    }
+
+    @Bean
+    public ExpressionEvaluatingRequestHandlerAdvice after() {
+        ExpressionEvaluatingRequestHandlerAdvice advice = new ExpressionEvaluatingRequestHandlerAdvice();
+        advice.setOnSuccessExpression("@template.remove(headers['file_remoteDirectory'] + headers['file_remoteFile'])");
+        advice.setPropagateEvaluationFailures(true);
+        return advice;
+    }
+
+}
